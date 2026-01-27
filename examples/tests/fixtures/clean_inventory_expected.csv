@@ -1,0 +1,6 @@
+SKU,Quantity,LastUpdated,Status
+ABC-001,150,2024-01-15,In Stock
+DEF-002,5,2024-01-14,Low Stock
+GHI-003,0,2024-01-13,Out of Stock
+JKL-004,25,2024-01-12,In Stock
+MNO-005,8,2024-01-11,Low Stock
