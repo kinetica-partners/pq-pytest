@@ -53,6 +53,7 @@ class MRunner(ABC):
     """Abstract base class for M language runtime implementations."""
     
     @abstractmethod
+    
     def is_available(self) -> bool:
         """Check if this runner is available on the system."""
         pass
@@ -120,7 +121,7 @@ class PowerQueryNetRunner(MRunner):
         """Check if pqnet is available."""
         try:
             result = subprocess.run(
-                [self.pqnet_path, "--help"],
+                [self.pqnet_path], 
                 capture_output=True,
                 timeout=5
             )
