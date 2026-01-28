@@ -149,7 +149,12 @@ class PowerQueryNetRunner(MRunner):
             temp_path = Path(f.name)
         
         try:
-            return self.execute_file(temp_path, context)
+            # Create clean context - input_files/parameters already baked into prepared_code
+            clean_context = MExecutionContext(
+                working_dir=context.working_dir,
+                timeout_seconds=context.timeout_seconds
+            )
+            return self.execute_file(temp_path, clean_context)
         finally:
             temp_path.unlink(missing_ok=True)
     
