@@ -10,22 +10,15 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    { name = "Your Name", email = "you@example.com" }
+    { name = "Your Name", email = "your.email@example.com" }
 ]
-keywords = [
-    "power-query",
-    "m-language",
-    "testing",
-    "pytest",
-    "excel",
-    "power-bi",
-    "etl"
-]
+keywords = ["powerquery", "pytest", "testing", "m-language", "etl"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Framework :: Pytest",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -33,19 +26,22 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 dependencies = [
-    "pytest>=7.0",
-    "pandas>=2.0",
     "click>=8.0",
+    "pandas>=1.5",
+    "pytest>=7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest-cov",
-    "black",
     "ruff",
     "mypy",
-    "pandas-stubs",
 ]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/pq-pytest"
+Repository = "https://github.com/YOUR_USERNAME/pq-pytest"
+Issues = "https://github.com/YOUR_USERNAME/pq-pytest/issues"
 
 [project.scripts]
 pq = "pq_pytest.cli:main"
@@ -53,33 +49,18 @@ pq = "pq_pytest.cli:main"
 [project.entry-points.pytest11]
 pq_pytest = "pq_pytest.plugin"
 
-[project.urls]
-Homepage = "https://github.com/yourusername/pq-pytest"
-Documentation = "https://github.com/yourusername/pq-pytest#readme"
-Issues = "https://github.com/yourusername/pq-pytest/issues"
-
 [tool.hatch.build.targets.wheel]
-packages = ["src/pq_pytest"]
-
-[tool.hatch.build.targets.sdist]
-include = [
-    "/src",
-    "/tests",
-    "/examples",
-]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-v"
+packages = ["pq_pytest"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "UP"]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
-warn_unused_ignores = true
+warn_unused_configs = true

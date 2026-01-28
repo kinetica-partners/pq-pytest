@@ -8,9 +8,9 @@ against a standalone M runtime (no Excel or Power BI Desktop required).
 Quick Start
 -----------
 
-1. Install the package:
+1. Install the package from GitHub:
 
-    pip install pq-pytest
+    pip install git+https://github.com/YOUR_USERNAME/pq-pytest.git
 
 2. Install a Power Query runtime:
    

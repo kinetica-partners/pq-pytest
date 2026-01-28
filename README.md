@@ -1,51 +1,218 @@
 # pq-pytest
 
-**Test Power Query M code with pytest — no Excel required.**
+Test Power Query M code with pytest - no Excel or Power BI required.
 
-Write your data transforms in Power Query M, test them with Python and pytest, and iterate rapidly with AI assistance (Claude Code, Copilot, etc.).
+`pq-pytest` provides a Python testing framework for Power Query M language transforms, allowing you to write automated tests for your M code using pytest and run them against a standalone M runtime.
 
-## The Problem
+## Features
 
-Power Query M is powerful for data transformation, but developing M code is painful:
+- **pytest integration**: Use familiar pytest fixtures and assertions
+- **Auto-discovery**: Automatically finds PowerQueryNet installation
+- **Auto-credentials**: Generates file access credentials automatically
+- **Multiple runtimes**: Supports PowerQueryNet and PQTest.exe
+- **DataFrame integration**: Convert results to pandas DataFrames
+- **CLI tools**: Run M code, check setup, scaffold new transforms
 
-- The "Advanced Editor" in Excel/Power BI is basically Notepad
-- No real testing framework
-- Can't run M code outside of a spreadsheet
-- Copy-pasting between Claude/Copilot and Excel is tedious
-- No CI/CD pipeline possible
+## Prerequisites
 
-## The Solution
+### Install PowerQueryNet (Recommended)
 
-`pq-pytest` gives you:
+PowerQueryNet is a free, open-source tool that executes Power Query M code outside of Excel/Power BI.
 
-- ✅ Run M code from the command line
-- ✅ Write tests in Python with pytest
-- ✅ Use fixtures, assertions, and all pytest features
-- ✅ Integrate with Claude Code for AI-assisted development
-- ✅ CI/CD ready
+1. Download from [PowerQueryNet Releases](https://github.com/gsimardnet/PowerQueryNet/releases)
+2. Run the installer (installs to `C:\Program Files\PowerQueryNet\` by default)
+3. **That's it!** No PATH configuration needed - pq-pytest auto-detects the installation
+
+### Alternative: Power Query SDK (Advanced)
+
+The Power Query SDK requires additional setup (connector file) and is primarily for connector development. For most testing scenarios, PowerQueryNet is simpler.
 
 ## Installation
 
+This package is installed directly from GitHub (not PyPI).
+
+### Using pip
+
 ```bash
-pip install pq-pytest
+pip install git+https://github.com/YOUR_USERNAME/pq-pytest.git
 ```
 
-You also need an M runtime. Choose one:
+### Using uv
 
-### Option A: PowerQueryNet (Recommended for simplicity)
+```bash
+uv add git+https://github.com/YOUR_USERNAME/pq-pytest.git
+```
 
-Download from [PowerQueryNet releases](https://github.com/gsimardnet/PowerQueryNet/releases) and install. The `pqnet` command should be available in your PATH.
+### In pyproject.toml
 
-### Option B: Power Query SDK (Official Microsoft)
+```toml
+[project]
+dependencies = [
+    "pq-pytest @ git+https://github.com/YOUR_USERNAME/pq-pytest.git",
+]
+```
 
-1. Install [VS Code](https://code.visualstudio.com/)
-2. Install the [Power Query SDK extension](https://marketplace.visualstudio.com/items?itemName=PowerQuery.vscode-powerquery-sdk)
+### Install a specific version/branch
 
-The SDK installs `PQTest.exe` which pq-pytest can use.
+```bash
+# Specific tag
+pip install git+https://github.com/YOUR_USERNAME/pq-pytest.git@v0.1.0
+
+# Specific branch
+pip install git+https://github.com/YOUR_USERNAME/pq-pytest.git@main
+
+# Specific commit
+pip install git+https://github.com/YOUR_USERNAME/pq-pytest.git@abc1234
+```
 
 ## Quick Start
 
-### 1. Check your setup
+### 1. Create an M Transform
+
+Create `transforms/clean_data.pq`:
+
+```powerquery
+// Input: [[InputPath]] - CSV file path
+// Output: Cleaned table
+
+let
+    Source = Csv.Document(
+        File.Contents([[InputPath]]),
+        [Delimiter=",", Encoding=65001]
+    ),
+    PromotedHeaders = Table.PromoteHeaders(Source),
+
+    // Remove rows with null values
+    Cleaned = Table.SelectRows(PromotedHeaders, each [Name] <> null)
+in
+    Cleaned
+```
+
+### 2. Write a Test
+
+Create `tests/test_clean_data.py`:
+
+```python
+from pathlib import Path
+
+TRANSFORMS = Path(__file__).parent.parent / "transforms"
+
+
+class TestCleanData:
+    def test_removes_null_rows(self, pq_execute_file, pq_assert, tmp_path):
+        # Create test input
+        input_file = tmp_path / "input.csv"
+        input_file.write_text("Name,Value\nAlice,100\n,200\nBob,300\n")
+
+        # Execute the transform
+        result = pq_execute_file(
+            TRANSFORMS / "clean_data.pq",
+            input_files={"InputPath": input_file}
+        )
+
+        # Assert results
+        pq_assert.assert_success(result)
+        pq_assert.assert_row_count(result, 2)  # Null row removed
+
+    def test_has_expected_columns(self, pq_execute_file, pq_assert, tmp_path):
+        input_file = tmp_path / "input.csv"
+        input_file.write_text("Name,Value\nAlice,100\n")
+
+        result = pq_execute_file(
+            TRANSFORMS / "clean_data.pq",
+            input_files={"InputPath": input_file}
+        )
+
+        pq_assert.assert_success(result)
+        pq_assert.assert_columns(result, ["Name", "Value"])
+```
+
+### 3. Run Tests
+
+```bash
+pytest tests/
+```
+
+## Fixtures Reference
+
+### `pq_execute_file`
+
+Execute an M transform file with input files and parameters:
+
+```python
+def test_example(pq_execute_file, pq_assert, tmp_path):
+    input_file = tmp_path / "data.csv"
+    input_file.write_text("col1,col2\n1,2\n")
+
+    result = pq_execute_file(
+        "transforms/my_transform.pq",
+        input_files={"InputPath": input_file},
+        parameters={"MaxRows": 100}
+    )
+
+    pq_assert.assert_success(result)
+```
+
+### `pq_execute`
+
+Execute inline M code:
+
+```python
+def test_inline(pq_execute, pq_assert):
+    result = pq_execute('let x = 1 + 1 in x')
+    pq_assert.assert_success(result)
+```
+
+### `pq_assert`
+
+Assertion helpers for M execution results:
+
+```python
+pq_assert.assert_success(result)           # Assert execution succeeded
+pq_assert.assert_row_count(result, 10)     # Assert row count
+pq_assert.assert_columns(result, ["a","b"]) # Assert column names
+pq_assert.assert_dataframe_equal(result, expected_df)  # Compare to DataFrame
+```
+
+### `pq_runner`
+
+Direct access to the M runtime (session-scoped):
+
+```python
+def test_direct(pq_runner):
+    result = pq_runner.execute('let x = 1 in x')
+    assert result.success
+    assert result.data == [{"Value": 1}]
+```
+
+## Input Placeholders
+
+In your M code, use `[[Name]]` syntax for inputs that will be substituted at test time:
+
+```powerquery
+let
+    // File path - will be replaced with actual path
+    Source = File.Contents([[InputPath]]),
+
+    // Parameter - will be replaced with value
+    Filtered = Table.FirstN(Data, [[MaxRows]])
+in
+    Filtered
+```
+
+Then in tests:
+
+```python
+result = pq_execute_file(
+    "transform.pq",
+    input_files={"InputPath": tmp_path / "data.csv"},
+    parameters={"MaxRows": 100}
+)
+```
+
+## CLI Usage
+
+### Check Runtime Availability
 
 ```bash
 pq check
@@ -56,356 +223,131 @@ Output:
 Checking Power Query runtimes...
 
 ✓ PowerQueryNet (pqnet): Available
-  Path: C:\Program Files\PowerQueryNet\pqnet.exe
+  Path: C:\Program Files\PowerQueryNet\PQNet.exe
+
+✗ PQTest.exe: Not found
+  Install Power Query SDK VS Code extension
 
 Default runner: PowerQueryNetRunner
 ```
 
-### 2. Create a test scaffold
-
-```bash
-pq scaffold clean_inventory
-```
-
-This creates:
-```
-transforms/
-  clean_inventory.pq      # Your M code
-tests/
-  test_clean_inventory.py # Python tests
-  fixtures/
-    clean_inventory_input.csv
-    clean_inventory_expected.csv
-```
-
-### 3. Write your M transform
-
-Edit `transforms/clean_inventory.pq`:
-
-```m
-let
-    // Load input data
-    Source = Csv.Document(
-        File.Contents([[InputPath]]),
-        [Delimiter=",", Encoding=65001]
-    ),
-    
-    // Promote headers
-    Headers = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
-    
-    // Type the columns
-    Typed = Table.TransformColumnTypes(Headers, {
-        {"SKU", type text},
-        {"Quantity", Int64.Type},
-        {"LastUpdated", type date}
-    }),
-    
-    // Filter out negative quantities
-    Filtered = Table.SelectRows(Typed, each [Quantity] >= 0),
-    
-    // Add a computed column
-    WithStatus = Table.AddColumn(Filtered, "Status", each 
-        if [Quantity] = 0 then "Out of Stock"
-        else if [Quantity] < 10 then "Low Stock"
-        else "In Stock"
-    )
-in
-    WithStatus
-```
-
-Note the `[[InputPath]]` placeholder — this gets replaced with the actual file path at runtime.
-
-### 4. Write your tests
-
-Edit `tests/test_clean_inventory.py`:
-
-```python
-from pathlib import Path
-import pandas as pd
-import pytest
-
-TRANSFORMS_DIR = Path(__file__).parent.parent / "transforms"
-
-class TestCleanInventory:
-    
-    def test_filters_negative_quantities(self, pq_execute_file, pq_assert, tmp_path):
-        # Create input with negative quantity
-        input_file = tmp_path / "input.csv"
-        input_file.write_text(
-            "SKU,Quantity,LastUpdated\n"
-            "ABC,10,2024-01-01\n"
-            "DEF,-5,2024-01-01\n"  # Should be filtered
-            "GHI,0,2024-01-01\n"
-        )
-        
-        result = pq_execute_file(
-            TRANSFORMS_DIR / "clean_inventory.pq",
-            input_files={"InputPath": input_file}
-        )
-        
-        pq_assert.assert_success(result)
-        pq_assert.assert_row_count(result, 2)  # DEF should be filtered out
-    
-    def test_adds_status_column(self, pq_execute_file, pq_assert, tmp_path):
-        input_file = tmp_path / "input.csv"
-        input_file.write_text(
-            "SKU,Quantity,LastUpdated\n"
-            "ABC,0,2024-01-01\n"
-            "DEF,5,2024-01-01\n"
-            "GHI,100,2024-01-01\n"
-        )
-        
-        result = pq_execute_file(
-            TRANSFORMS_DIR / "clean_inventory.pq",
-            input_files={"InputPath": input_file}
-        )
-        
-        pq_assert.assert_success(result)
-        df = result.to_dataframe()
-        
-        assert df.loc[df["SKU"] == "ABC", "Status"].iloc[0] == "Out of Stock"
-        assert df.loc[df["SKU"] == "DEF", "Status"].iloc[0] == "Low Stock"
-        assert df.loc[df["SKU"] == "GHI", "Status"].iloc[0] == "In Stock"
-    
-    def test_matches_expected_output(self, pq_execute_file, pq_assert, tmp_path):
-        # Use fixture files
-        input_file = tmp_path / "input.csv"
-        input_file.write_text(Path("tests/fixtures/clean_inventory_input.csv").read_text())
-        
-        expected = pd.read_csv("tests/fixtures/clean_inventory_expected.csv")
-        
-        result = pq_execute_file(
-            TRANSFORMS_DIR / "clean_inventory.pq",
-            input_files={"InputPath": input_file}
-        )
-        
-        pq_assert.assert_success(result)
-        pq_assert.assert_dataframe_equal(result, expected)
-```
-
-### 5. Run tests
-
-```bash
-pytest tests/ -v
-```
-
-Output:
-```
-tests/test_clean_inventory.py::TestCleanInventory::test_filters_negative_quantities PASSED
-tests/test_clean_inventory.py::TestCleanInventory::test_adds_status_column PASSED
-tests/test_clean_inventory.py::TestCleanInventory::test_matches_expected_output PASSED
-```
-
-## CLI Reference
-
-### `pq run` - Execute M code
+### Run M Code
 
 ```bash
 # Run from file
 pq run transforms/my_transform.pq
 
-# Run with input files
-pq run transforms/my_transform.pq -i InputPath data/input.csv
+# Run with inputs
+pq run transform.pq -i InputPath data/input.csv
 
 # Run with parameters
-pq run transforms/my_transform.pq -p Threshold 100
+pq run transform.pq -p MaxRows 100
 
 # Run inline code
 pq run -c "let x = 1 + 1 in x"
 
 # Output formats
-pq run transform.pq -o json   # JSON (default)
-pq run transform.pq -o csv    # CSV
-pq run transform.pq -o table  # Formatted table
+pq run transform.pq -o json    # JSON (default)
+pq run transform.pq -o csv     # CSV
+pq run transform.pq -o table   # ASCII table
 ```
 
-### `pq check` - Check runtime availability
+### Scaffold New Transform
 
 ```bash
-pq check
+pq scaffold my_new_transform
 ```
 
-### `pq scaffold` - Create test scaffold
+Creates:
+- `transforms/my_new_transform.pq` - M code template
+- `tests/test_my_new_transform.py` - Python test file
+- `tests/fixtures/my_new_transform_input.csv` - Sample input
+- `tests/fixtures/my_new_transform_expected.csv` - Expected output
+
+## Configuration
+
+### pytest Options
 
 ```bash
-pq scaffold my_transform
+# Use specific runner
+pytest --pq-runner=pqnet
+pytest --pq-runner=mock    # For testing without runtime
+
+# Set timeout
+pytest --pq-timeout=120
 ```
 
-### `pq snapshot` - Generate expected output
+### Custom Runner Configuration
 
-```bash
-pq snapshot transforms/my_transform.pq
-# Creates transforms/my_transform.pqout
-```
-
-## Fixtures Reference
-
-### `pq_runner`
-
-The M runtime instance. Usually you'll use the higher-level fixtures instead.
+If PowerQueryNet is installed in a non-standard location:
 
 ```python
-def test_low_level(pq_runner):
-    result = pq_runner.execute("let x = 1 in x")
-    assert result.success
-```
+# conftest.py
+import pytest
+from pq_pytest.runner import PowerQueryNetRunner
 
-### `pq_context`
-
-Execution context with input files, parameters, and settings.
-
-```python
-def test_with_context(pq_runner, pq_context, tmp_path):
-    pq_context.input_files["MyInput"] = tmp_path / "data.csv"
-    pq_context.parameters["Threshold"] = 100
-    pq_context.timeout_seconds = 120
-    
-    result = pq_runner.execute(m_code, pq_context)
-```
-
-### `pq_execute`
-
-Convenience fixture combining runner and context.
-
-```python
-def test_simple(pq_execute):
-    result = pq_execute("let x = 1 + 1 in x")
-    assert result.success
-```
-
-### `pq_execute_file`
-
-Execute M code from a file.
-
-```python
-def test_from_file(pq_execute_file):
-    result = pq_execute_file(
-        "transforms/my_transform.pq",
-        input_files={"InputPath": some_file}
+@pytest.fixture(scope="session")
+def pq_runner():
+    return PowerQueryNetRunner(
+        pqnet_path=r"D:\Tools\PowerQueryNet\PQNet.exe",
+        credentials_path=r"D:\my_credentials.xml"  # Optional
     )
-    assert result.success
 ```
 
-### `pq_assert`
+## Working with Results
 
-Assertion helpers.
+### Convert to DataFrame
 
 ```python
-def test_with_assertions(pq_execute, pq_assert):
-    result = pq_execute(m_code)
-    
+def test_dataframe(pq_execute_file, pq_assert, tmp_path):
+    # ... execute transform ...
+
     pq_assert.assert_success(result)
-    pq_assert.assert_row_count(result, 10)
-    pq_assert.assert_columns(result, ["id", "name", "value"])
-    pq_assert.assert_dataframe_equal(result, expected_df)
-    pq_assert.assert_output_matches_file(result, "expected.csv")
+    df = result.to_dataframe()
+
+    # Now use pandas operations
+    assert df["Amount"].sum() == 1000
+    assert len(df[df["Status"] == "Active"]) == 5
 ```
 
-### `pq_mock_runner`
-
-Mock runner for testing without a real runtime.
+### Access Raw Data
 
 ```python
-def test_with_mock(pq_mock_runner):
-    pq_mock_runner.set_response(
-        "MyQuery",
-        MExecutionResult(success=True, data=[{"col": 1}])
-    )
-    
-    result = pq_mock_runner.execute("let x = MyQuery() in x")
-    assert result.data == [{"col": 1}]
+result = pq_execute_file(...)
+if result.success:
+    for row in result.data:
+        print(row)  # Each row is a dict
 ```
 
-## Integration with Claude Code
+## Troubleshooting
 
-This package is designed to work seamlessly with AI coding assistants. The workflow:
+### "No Power Query runtime found"
 
-1. **You describe what you want**: "Create an M transform that cleans inventory data by removing negative quantities and adding a stock status column"
+Install PowerQueryNet:
+1. Download from https://github.com/gsimardnet/PowerQueryNet/releases
+2. Run the installer
+3. Run `pq check` to verify
 
-2. **Claude writes the M code** and saves it to `transforms/clean_inventory.pq`
+### "Credentials are required to connect to the File source"
 
-3. **Claude writes tests** in `tests/test_clean_inventory.py`
+This should be handled automatically. If you see this error:
+- Ensure you're passing input files via `input_files={"InputPath": path}`
+- The path must be a `Path` object or string pointing to an existing file
 
-4. **Claude runs the tests**: `pytest tests/test_clean_inventory.py -v`
+### Tests pass individually but fail together
 
-5. **If tests fail**, Claude sees the error output and iterates
+Each test should use `tmp_path` fixture for isolation:
 
-The CLI's JSON output format is designed for easy parsing:
-
-```bash
-pq run transform.pq -o json
+```python
+def test_example(pq_execute_file, tmp_path):  # Use tmp_path!
+    input_file = tmp_path / "input.csv"
+    # ...
 ```
-
-```json
-{
-  "success": true,
-  "data": [
-    {"SKU": "ABC", "Quantity": 10, "Status": "In Stock"},
-    {"SKU": "DEF", "Quantity": 0, "Status": "Out of Stock"}
-  ]
-}
-```
-
-Or on error:
-
-```json
-{
-  "success": false,
-  "error": "Expression.Error: The column 'Price' of the table wasn't found.",
-  "line": 15,
-  "column": 8
-}
-```
-
-## Input Placeholder Syntax
-
-Use these patterns in your M code to mark where input file paths should be injected:
-
-| Pattern | Example | Description |
-|---------|---------|-------------|
-| `[[Name]]` | `File.Contents([[InputPath]])` | Recommended - clear and explicit |
-| `#"Name"` | `File.Contents(#"InputPath")` | M-style identifier (can conflict with step names) |
-
-The placeholder is replaced with the actual file path at runtime.
-
-## Project Structure
-
-Recommended project structure:
-
-```
-my-project/
-├── transforms/           # M code files
-│   ├── clean_inventory.pq
-│   ├── calculate_reorder.pq
-│   └── aggregate_sales.pq
-├── tests/
-│   ├── conftest.py       # Shared fixtures
-│   ├── fixtures/         # Test data
-│   │   ├── inventory_input.csv
-│   │   └── inventory_expected.csv
-│   ├── test_clean_inventory.py
-│   └── test_calculate_reorder.py
-├── pyproject.toml
-└── README.md
-```
-
-## Limitations
-
-- **Output limited to 1000 rows** with PQTest.exe (SDK limitation)
-- **No DirectQuery support** - only import mode
-- **Windows only** for PowerQueryNet; PQTest requires Windows too
-- **Some M functions may not work** outside Power BI (e.g., `PowerBI.Dataflows`)
-
-## Contributing
-
-Contributions welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE).
+MIT License - see LICENSE file for details.
 
-## Acknowledgments
+## Contributing
 
-- [PowerQueryNet](https://github.com/gsimardnet/PowerQueryNet) by Gabriel Simard
-- [Power Query SDK](https://github.com/microsoft/vscode-powerquery-sdk) by Microsoft
-- The Power Query team at Microsoft
+Contributions welcome! Please open an issue or PR on GitHub.

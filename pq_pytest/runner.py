@@ -107,71 +107,162 @@ class MRunner(ABC):
 class PowerQueryNetRunner(MRunner):
     """
     Runner implementation using PowerQueryNet (pqnet CLI).
-    
+
     PowerQueryNet is a community tool that can execute M queries directly
     without requiring a custom connector.
-    
+
     Install: https://github.com/gsimardnet/PowerQueryNet
     """
-    
-    def __init__(self, pqnet_path: str | None = None):
-        self.pqnet_path = pqnet_path or "pqnet"
-    
+
+    # Common installation paths for PowerQueryNet
+    COMMON_PATHS = [
+        r"C:\Program Files\PowerQueryNet\PQNet.exe",
+        r"C:\Program Files (x86)\PowerQueryNet\PQNet.exe",
+    ]
+
+    def __init__(self, pqnet_path: str | None = None, credentials_path: str | None = None):
+        self.pqnet_path = pqnet_path or self._find_pqnet()
+        self.credentials_path = credentials_path
+        self._auto_credentials_path: str | None = None
+
+    def _find_pqnet(self) -> str | None:
+        """Try to find PQNet.exe in common locations."""
+        # Check if it's in PATH (try common names)
+        for name in ["pqnet", "PQNet", "PQNet.exe"]:
+            path = shutil.which(name)
+            if path:
+                return path
+
+        # Check common installation directories
+        for path in self.COMMON_PATHS:
+            if Path(path).exists():
+                return path
+
+        # Check LOCALAPPDATA
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            local_path = Path(local_app_data) / "PowerQueryNet" / "PQNet.exe"
+            if local_path.exists():
+                return str(local_path)
+
+        return None
+
     def is_available(self) -> bool:
         """Check if pqnet is available."""
+        if not self.pqnet_path:
+            return False
         try:
             result = subprocess.run(
-                [self.pqnet_path], 
+                [self.pqnet_path],
                 capture_output=True,
                 timeout=5
             )
             return result.returncode == 0
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
+
+    def _get_credentials_path(self, context: MExecutionContext | None) -> str | None:
+        """Get or generate credentials path for file access."""
+        # Use explicitly provided credentials
+        if self.credentials_path:
+            return self.credentials_path
+
+        # Auto-generate credentials if we have input files
+        if context and context.input_files:
+            return self._generate_credentials(context)
+
+        return None
+
+    def _generate_credentials(self, context: MExecutionContext) -> str:
+        """Generate a temporary credentials file for the input file paths."""
+        # Collect unique parent directories from input files
+        # Use resolve() to get canonical paths (handles short names, symlinks, etc.)
+        folders = set()
+        for path in context.input_files.values():
+            resolved = Path(path).resolve()
+            folders.add(str(resolved.parent))
+
+        # Generate XML credentials for these specific folders
+        cred_entries = []
+        for folder in sorted(folders):  # Sort for deterministic output
+            cred_entries.append(
+                f'  <Credential xsi:type="CredentialFolder">\n'
+                f'    <Path>{folder}</Path>\n'
+                f'  </Credential>'
+            )
+
+        xml_content = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<Credentials xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xmlns:xsd="http://www.w3.org/2001/XMLSchema">\n'
+            f'{"".join(cred_entries)}\n'
+            '</Credentials>'
+        )
+
+        # Write to temp file (create new each time - paths may differ between calls)
+        cred_file = tempfile.NamedTemporaryFile(
+            mode='w',
+            suffix='.xml',
+            prefix='pqnet_credentials_',
+            delete=False
+        )
+        cred_file.write(xml_content)
+        cred_file.close()
+        self._auto_credentials_path = cred_file.name
+        return self._auto_credentials_path
     
     def execute(
-        self, 
-        m_code: str, 
+        self,
+        m_code: str,
         context: MExecutionContext | None = None
     ) -> MExecutionResult:
         """Execute M code string."""
         context = context or MExecutionContext()
-        
+
+        # Generate credentials for input files BEFORE cleaning the context
+        if context.input_files and not self.credentials_path:
+            self._generate_credentials(context)
+
         # Create temp file for the M code
         with tempfile.NamedTemporaryFile(
-            mode='w', 
-            suffix='.pq', 
+            mode='w',
+            suffix='.pq',
             delete=False,
             dir=context.working_dir
         ) as f:
             prepared_code = self._prepare_m_code(m_code, context)
             f.write(prepared_code)
             temp_path = Path(f.name)
-        
+
         try:
-            # Create clean context - input_files/parameters already baked into prepared_code
+            # Pass a clean context - input_files/parameters are already substituted
             clean_context = MExecutionContext(
-                working_dir=context.working_dir,
-                timeout_seconds=context.timeout_seconds
+                timeout_seconds=context.timeout_seconds,
+                working_dir=context.working_dir
             )
             return self.execute_file(temp_path, clean_context)
         finally:
             temp_path.unlink(missing_ok=True)
-    
+
     def execute_file(
-        self, 
-        pq_file: Path, 
+        self,
+        pq_file: Path,
         context: MExecutionContext | None = None
     ) -> MExecutionResult:
         """Execute M code from a .pq file."""
         context = context or MExecutionContext()
-        
+
         # If we have input files, we need to prepare the code
         if context.input_files or context.parameters:
             m_code = pq_file.read_text(encoding='utf-8')
             return self.execute(m_code, context)
-        
+
         cmd = [self.pqnet_path, str(pq_file), "-o", "json"]
+
+        # Use explicit credentials, or auto-generated ones
+        creds = self.credentials_path or self._auto_credentials_path
+        if creds:
+            cmd.extend(["-c", creds])
         
         try:
             result = subprocess.run(
@@ -278,7 +369,13 @@ class PQTestRunner(MRunner):
         return None
     
     def is_available(self) -> bool:
-        """Check if PQTest is available."""
+        """Check if PQTest is available and properly configured."""
+        # PQTest requires a connector (.mez) file to run queries
+        # Without a connector, it can't execute any M code
+        if not self.connector_path:
+            return False
+        if not Path(self.connector_path).exists():
+            return False
         if not self.pqtest_path:
             return False
         try:
